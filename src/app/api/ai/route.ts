@@ -28,22 +28,54 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing "query" in body' }, { status: 400 });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
-    // Not configured yet — return deterministic stub so UI can proceed.
-    return NextResponse.json({
-      result: `AI not configured. Stub answer for: ${query}`,
-      context,
-      provider: 'gemini',
-      configured: false,
-    }, { status: 501 });
+  // Integrate Gemini free-tier via REST API
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      {
+        error: 'GEMINI_API_KEY not configured',
+        result: `AI not configured. Stub answer for: ${query}`,
+        provider: 'gemini',
+        configured: false,
+      },
+      { status: 501 }
+    );
   }
 
-  // TODO: Integrate Gemini API call here (free-tier), cache responses.
-  // For now, return a placeholder success to unblock UI.
-  return NextResponse.json({
-    result: `Stubbed AI response for: ${query}`,
-    provider: 'gemini',
-    configured: true,
-  });
+  try {
+    const resp = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + apiKey,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: query }],
+            },
+          ],
+        }),
+      }
+    );
+    const json = await resp.json();
+    // Extract plain text from Gemini response safely
+    const text =
+      json?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      json?.candidates?.[0]?.output ||
+      JSON.stringify(json);
+    return NextResponse.json({
+      result: text,
+      provider: 'gemini',
+      configured: true,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        error: 'Gemini request failed',
+        details: err?.message || String(err),
+      },
+      { status: 502 }
+    );
+  }
 }
-
